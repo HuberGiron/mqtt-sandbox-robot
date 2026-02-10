@@ -1,6 +1,6 @@
 let errorChart, positionChart, controlChart;
 
-function initCharts(timeData, errorXData, errorYData, posXData, posYData, VData, WData) {
+function initCharts(timeData, errorXData, errorYData, posXData, posYData, VData, WData, goalXData, goalYData) {
   const commonOptions = {
     responsive: true,
     maintainAspectRatio: false,
@@ -76,6 +76,26 @@ function initCharts(timeData, errorXData, errorYData, posXData, posYData, VData,
           fill: false,
           tension: 0.1,
           pointRadius: 0
+        },
+        {
+          label: 'Objetivo Xs (mm)',
+          data: goalXData,
+          borderColor: 'rgba(0,0,0,0.35)',
+          borderWidth: 1,
+          fill: false,
+          tension: 0.1,
+          pointRadius: 0,
+          borderDash: [6, 6]
+        },
+        {
+          label: 'Objetivo Ys (mm)',
+          data: goalYData,
+          borderColor: 'rgba(0,0,0,0.35)',
+          borderWidth: 1,
+          fill: false,
+          tension: 0.1,
+          pointRadius: 0,
+          borderDash: [2, 6]
         }
       ]
     },
@@ -134,7 +154,7 @@ function initCharts(timeData, errorXData, errorYData, posXData, posYData, VData,
   });
 }
 
-function updateCharts(timeData, errorXData, errorYData, posXData, posYData, VData, WData) {
+function updateCharts(timeData, errorXData, errorYData, posXData, posYData, VData, WData, goalXData, goalYData) {
   errorChart.data.labels = timeData;
   errorChart.data.datasets[0].data = errorXData;
   errorChart.data.datasets[1].data = errorYData;
@@ -142,6 +162,10 @@ function updateCharts(timeData, errorXData, errorYData, posXData, posYData, VDat
   positionChart.data.labels = timeData;
   positionChart.data.datasets[0].data = posXData;
   positionChart.data.datasets[1].data = posYData;
+  if (positionChart.data.datasets.length > 2) {
+    positionChart.data.datasets[2].data = goalXData;
+    positionChart.data.datasets[3].data = goalYData;
+  }
 
   controlChart.data.labels = timeData;
   controlChart.data.datasets[0].data = VData;
@@ -170,9 +194,11 @@ function downloadCSVForChart(chartType) {
     }
   } else if (chartType === 'position') {
     fileName = 'position_chart_data';
-    csv += 'Tiempo (s),Posición X (mm),Posición Y (mm)\n';
+    csv += 'Tiempo (s),Posición X (mm),Posición Y (mm),Objetivo Xs (mm),Objetivo Ys (mm)\n';
     for (let i = 0; i < timeData.length; i++) {
-      csv += timeData[i] + ',' + posXData[i] + ',' + posYData[i] + '\n';
+      const xs = (typeof goalXData !== 'undefined' && goalXData[i] != null) ? goalXData[i] : '';
+      const ys = (typeof goalYData !== 'undefined' && goalYData[i] != null) ? goalYData[i] : '';
+      csv += timeData[i] + ',' + posXData[i] + ',' + posYData[i] + ',' + xs + ',' + ys + '';
     }
   } else if (chartType === 'control') {
     fileName = 'control_chart_data';

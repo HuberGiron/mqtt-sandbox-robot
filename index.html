@@ -122,11 +122,21 @@ $$
       <input type="number" id="startY" value="-100">
       <label for="angle">Ángulo Inicial (°):</label>
       <input type="number" id="angle" value="0" step="1">
+
       <label for="endX">X Final deseada (mm):</label>
       <input type="number" id="endX" value="100">
       <label for="endY">Y Final deseada (mm):</label>
       <input type="number" id="endY" value="100">
+
+      <div class="target-source">
+        <label class="constant-label">Fuente de objetivo (Xs, Ys):</label>
+        <div class="radio-row">
+          <label><input type="radio" name="targetSource" value="manual" checked> Manual</label>
+          <label><input type="radio" name="targetSource" value="mqtt"> MQTT</label>
+        </div>
+      </div>
     </div>
+
     <div class="constant-inputs">
       <label for="k" class="constant-label">Ganancia K:</label>
       <input type="number" id="k" value="0.5" step="0.01">
@@ -134,13 +144,33 @@ $$
       <input type="number" id="l" value="50" step="1">
       <label for="dt" class="constant-label">Tiempo dt (s):</label>
       <input type="number" id="dt" value="0.05" step="0.01">
+
+      <div id="mqttPanel" class="mqtt-panel" style="display:none;">
+        <label for="mqttUrl" class="constant-label">Broker MQTT (WebSocket):</label>
+        <input type="text" id="mqttUrl" value="wss://test.mosquitto.org:8081/mqtt">
+        <label for="mqttTopic" class="constant-label">Tópico objetivo:</label>
+        <input type="text" id="mqttTopic" value="huber/robot/goal">
+
+        <div class="mqtt-row">
+          <button id="mqttConnectBtn" class="small-button" type="button">Conectar</button>
+          <span id="mqttStatus" class="mqtt-status offline">Desconectado</span>
+        </div>
+
+        <div class="mqtt-hint">
+          Formato de mensaje esperado: <code>{"x":100,"y":-50}</code> o <code>100,-50</code> (mm)
+        </div>
+      </div>
     </div>
+
     <div class="button-controls">
       <button id="animateBtn" class="control-button">
-        <span id="animateIcon">&#9658;</span> Iniciar y Pausa
+        <span id="animateIcon">&#9658;</span> Iniciar
       </button>
       <button id="restartBtn" class="control-button">
         <span id="restartIcon">&#8635;</span> Reiniciar
+      </button>
+      <button id="saveSessionBtn" class="control-button">
+        <span id="saveIcon">&#128190;</span> Guardar CSV sesión
       </button>
     </div>
   </div>
@@ -194,6 +224,8 @@ $$
   
   <!-- Librería Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Librería MQTT.js (cliente MQTT en navegador) -->
+  <script src="https://cdn.jsdelivr.net/npm/mqtt/dist/mqtt.min.js"></script>
   <!-- Nuestros scripts -->
   <script src="robot.js"></script>
   <script src="charts.js"></script>

@@ -66,13 +66,14 @@ input {
 
 .button-controls {
   grid-column: 1 / -1;
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
   margin-top: 10px;
 }
 
 .control-button {
-  width: 48%;
+  width: 100%;
   padding: 12px;
   font-size: 1rem;
   background-color: #cc0000;
@@ -225,13 +226,85 @@ input {
     grid-template-columns: 1fr;
   }
   .button-controls {
-    flex-direction: column;
-    gap: 10px;
+    grid-template-columns: 1fr;
   }
-  .control-button {
+.control-button {
     width: 100%;
   }
   .chart-container {
     max-width: 100%;
   }
+}
+
+
+/* Fuente de objetivo (Manual/MQTT) */
+.target-source {
+  margin-top: 10px;
+}
+.radio-row {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+  align-items: center;
+}
+.radio-row label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 0;
+}
+
+/* Panel MQTT */
+.mqtt-panel {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed #ccc;
+}
+.mqtt-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+.small-button {
+  padding: 10px 12px;
+  font-size: 0.95rem;
+  background-color: #333;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.small-button:hover {
+  filter: brightness(0.92);
+}
+.mqtt-status {
+  font-weight: bold;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.9rem;
+}
+.mqtt-status.offline {
+  background: #eee;
+  color: #333;
+}
+.mqtt-status.connecting {
+  background: #ffe9b3;
+  color: #5a3c00;
+}
+.mqtt-status.online {
+  background: #d6f5d6;
+  color: #114d11;
+}
+.mqtt-hint {
+  margin-top: 8px;
+  font-size: 0.85rem;
+  color: #555;
+  line-height: 1.4;
+}
+.mqtt-hint code {
+  background: #fff;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid #ddd;
 }

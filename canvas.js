@@ -24,14 +24,21 @@ const ctx = canvas.getContext('2d');
 const SIM_X_MIN = -300, SIM_X_MAX = 300;
 const SIM_Y_MIN = -200, SIM_Y_MAX = 200;
 const SIM_WIDTH = SIM_X_MAX - SIM_X_MIN;   // 600
-const SIM_HEIGHT = SIM_Y_MAX - SIM_Y_MIN;    // 400
+const SIM_HEIGHT = SIM_Y_MAX - SIM_Y_MIN;  // 400
 
 // Dimensiones originales del robot (en mm)
-const originalRobotWidth = 150; // Valor original para robotWidth
+const originalRobotWidth = 150;
 
-let isAnimating = false;
-let animationId;
+// Estado de simulación
+let simState = 'idle'; // 'idle' | 'running' | 'paused'
+let animationId = null;
 let cycleCount = 0;
+
+// Para avanzar la simulación en "tiempo real" usando dt (s)
+let lastTs = null;
+let accumulator = 0;
+const MAX_STEPS_PER_FRAME = 5;
+
 const robot = new Robot();
 
 // Configuración actual del robot (en mm)
@@ -53,6 +60,26 @@ let posXData = [];
 let posYData = [];
 let VData = [];
 let WData = [];
+let thetaDegData = [];
+let goalXData = [];
+let goalYData = [];
+
+// Objetivo deseado (manual o MQTT)
+const desired = {
+  x: 100,
+  y: 100,
+  source: 'manual', // 'manual' | 'mqtt'
+  lastUpdateMs: Date.now()
+};
+
+// MQTT (cliente en navegador via mqtt.js)
+let mqttClient = null;
+let mqttIsConnected = false;
+let mqttSubscribedTopic = '';
+
+function clamp(v, min, max) {
+  return Math.max(min, Math.min(max, v));
+}
 
 // Función para ajustar el tamaño del canvas según el contenedor
 function updateCanvasSize() {
@@ -91,34 +118,147 @@ window.addEventListener('resize', () => {
   }, 100);
 });
 
-document.getElementById('animateBtn').addEventListener('click', toggleAnimation);
-document.getElementById('restartBtn').addEventListener('click', resetAnimation);
-document.querySelectorAll('input').forEach(input => {
-  input.addEventListener('input', updatePreview);
+// Elementos UI
+const startXInput = document.getElementById('startX');
+const startYInput = document.getElementById('startY');
+const angleInput = document.getElementById('angle');
+const endXInput = document.getElementById('endX');
+const endYInput = document.getElementById('endY');
+const kInput = document.getElementById('k');
+const lInput = document.getElementById('l');
+const dtInput = document.getElementById('dt');
+
+const animateBtn = document.getElementById('animateBtn');
+const restartBtn = document.getElementById('restartBtn');
+const saveSessionBtn = document.getElementById('saveSessionBtn');
+
+const mqttPanel = document.getElementById('mqttPanel');
+const mqttUrlInput = document.getElementById('mqttUrl');
+const mqttTopicInput = document.getElementById('mqttTopic');
+const mqttConnectBtn = document.getElementById('mqttConnectBtn');
+const mqttStatusEl = document.getElementById('mqttStatus');
+
+// --- Eventos UI
+animateBtn.addEventListener('click', toggleSimulation);
+restartBtn.addEventListener('click', resetSimulation);
+saveSessionBtn.addEventListener('click', downloadSessionCSV);
+
+// Inputs "de arranque" (solo en idle)
+[startXInput, startYInput, angleInput, kInput, lInput, dtInput].forEach(inp => {
+  inp.addEventListener('input', updatePreview);
 });
 
+// Objetivo manual: debe poder cambiar incluso en running/paused
+[endXInput, endYInput].forEach(inp => {
+  inp.addEventListener('input', () => {
+    if (desired.source === 'manual') {
+      updateDesiredFromInputs();
+    }
+    drawAllElements();
+  });
+});
+
+// Selector Manual/MQTT
+document.querySelectorAll('input[name="targetSource"]').forEach(radio => {
+  radio.addEventListener('change', () => {
+    setTargetSource(document.querySelector('input[name="targetSource"]:checked').value);
+  });
+});
+
+// MQTT connect/disconnect
+mqttConnectBtn.addEventListener('click', () => {
+  if (mqttIsConnected) {
+    mqttDisconnect();
+  } else {
+    mqttConnect();
+  }
+});
+
+// Si cambia el tópico mientras estás conectado, re-suscribir
+mqttTopicInput.addEventListener('input', () => {
+  if (mqttIsConnected) {
+    mqttResubscribe();
+  }
+});
+
+// Inicialización cuando carga la imagen
 robotImg.onload = () => {
   updateCanvasSize();
-  updatePreview();
-  initCharts(timeData, errorXData, errorYData, posXData, posYData, VData, WData);
+  updateDesiredFromInputs(); // set initial desired from UI
+  updatePreview(); // aplica condiciones iniciales (solo si idle)
+  initCharts(timeData, errorXData, errorYData, posXData, posYData, VData, WData, goalXData, goalYData);
 };
 
-function updatePreview() {
-  if (!isAnimating) {
-    const startX = parseFloat(document.getElementById('startX').value);
-    const startY = parseFloat(document.getElementById('startY').value);
-    const angle = parseFloat(document.getElementById('angle').value);
-    robot.setInitialConditions(startX, startY, angle);
-    const k = parseFloat(document.getElementById('k').value);
-    const l = parseFloat(document.getElementById('l').value);
-    const dt = parseFloat(document.getElementById('dt').value);
-    robot.k = k;
-    robot.l = l;
-    robot.dt = dt;
-    drawAllElements();
+// --- Lógica de objetivo (manual/MQTT)
+function setTargetSource(source) {
+  desired.source = (source === 'mqtt') ? 'mqtt' : 'manual';
+
+  if (desired.source === 'mqtt') {
+    // El objetivo viene de mensajes; el usuario no teclea
+    endXInput.disabled = true;
+    endYInput.disabled = true;
+    mqttPanel.style.display = 'block';
+  } else {
+    endXInput.disabled = false;
+    endYInput.disabled = false;
+    mqttPanel.style.display = 'none';
+    updateDesiredFromInputs();
   }
+
+  drawAllElements();
 }
 
+function updateDesiredFromInputs() {
+  const x = parseFloat(endXInput.value);
+  const y = parseFloat(endYInput.value);
+  if (Number.isFinite(x)) desired.x = clamp(x, SIM_X_MIN, SIM_X_MAX);
+  if (Number.isFinite(y)) desired.y = clamp(y, SIM_Y_MIN, SIM_Y_MAX);
+
+  // Refleja clamp si aplica
+  endXInput.value = desired.x;
+  endYInput.value = desired.y;
+
+  desired.lastUpdateMs = Date.now();
+}
+
+function setDesired(x, y, origin = 'mqtt') {
+  // Solo aceptamos cambios por MQTT cuando el modo es MQTT
+  if (origin === 'mqtt' && desired.source !== 'mqtt') return;
+
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+
+  desired.x = clamp(x, SIM_X_MIN, SIM_X_MAX);
+  desired.y = clamp(y, SIM_Y_MIN, SIM_Y_MAX);
+
+  // Reflejar en UI (aunque esté deshabilitado)
+  endXInput.value = desired.x;
+  endYInput.value = desired.y;
+
+  desired.lastUpdateMs = Date.now();
+}
+
+// --- Previsualización (solo en idle)
+function updatePreview() {
+  if (simState !== 'idle') return;
+
+  const startX = parseFloat(startXInput.value);
+  const startY = parseFloat(startYInput.value);
+  const angle = parseFloat(angleInput.value);
+
+  robot.setInitialConditions(startX, startY, angle);
+
+  robot.k = parseFloat(kInput.value);
+  robot.l = parseFloat(lInput.value);
+  robot.dt = parseFloat(dtInput.value);
+
+  if (desired.source === 'manual') {
+    updateDesiredFromInputs();
+  }
+
+  drawAllElements();
+}
+
+// --- Dibujo
 function drawAllElements() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -230,12 +370,16 @@ function drawTrajectory() {
 }
 
 function drawPointsCircles() {
-  const startX = parseFloat(document.getElementById('startX').value);
-  const startY = parseFloat(document.getElementById('startY').value);
-  const endX = parseFloat(document.getElementById('endX').value);
-  const endY = parseFloat(document.getElementById('endY').value);
+  const startX = parseFloat(startXInput.value);
+  const startY = parseFloat(startYInput.value);
+
+  // Ojo: el "punto deseado" siempre se toma del UI (se actualiza desde MQTT cuando aplica)
+  const endX = parseFloat(endXInput.value);
+  const endY = parseFloat(endYInput.value);
+
   drawCircle(startX, startY, '#00FF00');
   drawCircle(endX, endY, '#0000FF');
+
   const extPoint = robot.getExtensionPoint();
   drawCircle(extPoint.x, extPoint.y, '#FF0000');
 }
@@ -255,10 +399,10 @@ function drawPointsLabels() {
   const cx = actualWidth / 2;
   const cy = canvas.height / 2;
 
-  const startX = parseFloat(document.getElementById('startX').value);
-  const startY = parseFloat(document.getElementById('startY').value);
-  const endX = parseFloat(document.getElementById('endX').value);
-  const endY = parseFloat(document.getElementById('endY').value);
+  const startX = parseFloat(startXInput.value);
+  const startY = parseFloat(startYInput.value);
+  const endX = parseFloat(endXInput.value);
+  const endY = parseFloat(endYInput.value);
 
   const startCanvasX = cx + startX * scaleFactor;
   const startCanvasY = cy - startY * scaleFactor;
@@ -277,19 +421,34 @@ function drawPointsLabels() {
 function updateRobotInfo() {
   const pos = robot.getCurrentPosition();
   document.getElementById('robotInfo').textContent =
-    `Posición: (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}) | Ángulo: ${(robot.theta * 180 / Math.PI).toFixed(1)}°`;
+    `Posición: (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}) | Ángulo: ${(robot.theta * 180 / Math.PI).toFixed(1)}° | Objetivo(${desired.source.toUpperCase()}): (${desired.x.toFixed(0)}, ${desired.y.toFixed(0)})`;
 }
 
-function toggleAnimation() {
-  if (isAnimating) {
-    stopAnimation();
+// --- Simulación (start/pause/resume)
+function toggleSimulation() {
+  if (simState === 'running') {
+    pauseSimulation();
+  } else if (simState === 'paused') {
+    resumeSimulation();
   } else {
-    startAnimation();
+    startSimulation();
   }
 }
 
-function startAnimation() {
-  isAnimating = true;
+function setInputsEnabled(enabled) {
+  startXInput.disabled = !enabled;
+  startYInput.disabled = !enabled;
+  angleInput.disabled = !enabled;
+  kInput.disabled = !enabled;
+  lInput.disabled = !enabled;
+  dtInput.disabled = !enabled;
+}
+
+function startSimulation() {
+  // Congelar parámetros iniciales
+  updatePreview(); // aplica robot.setInitialConditions + k,l,dt (solo si idle)
+
+  // Reset de datos de sesión
   cycleCount = 0;
   timeData = [];
   errorXData = [];
@@ -298,22 +457,52 @@ function startAnimation() {
   posYData = [];
   VData = [];
   WData = [];
-  document.getElementById('animateBtn').innerHTML = `<span id="animateIcon">&#10074;&#10074;</span> Pausa`;
-  document.getElementById('angle').disabled = true;
-  animate();
+  thetaDegData = [];
+  goalXData = [];
+  goalYData = [];
+
+  // Reset acumuladores de tiempo
+  lastTs = null;
+  accumulator = 0;
+
+  // UI
+  simState = 'running';
+  animateBtn.innerHTML = `<span id="animateIcon">&#10074;&#10074;</span> Pausa`;
+  setInputsEnabled(false);
+
+  // (Re)inicializar charts con referencias nuevas
+  // Nota: initCharts ya se llamó una vez; aquí solo actualizamos (mantiene instancias)
+  updateCharts(timeData, errorXData, errorYData, posXData, posYData, VData, WData, goalXData, goalYData);
+
+  animationId = requestAnimationFrame(animateFrame);
 }
 
-function stopAnimation() {
-  isAnimating = false;
+function pauseSimulation() {
+  simState = 'paused';
   cancelAnimationFrame(animationId);
-  document.getElementById('animateBtn').innerHTML = `<span id="animateIcon">&#9658;</span> Iniciar`;
-  document.getElementById('angle').disabled = false;
+  animationId = null;
+  lastTs = null;
+  accumulator = 0;
+  animateBtn.innerHTML = `<span id="animateIcon">&#9658;</span> Reanudar`;
 }
 
-function resetAnimation() {
-  stopAnimation();
+function resumeSimulation() {
+  simState = 'running';
+  animateBtn.innerHTML = `<span id="animateIcon">&#10074;&#10074;</span> Pausa`;
+  lastTs = null;
+  accumulator = 0;
+  animationId = requestAnimationFrame(animateFrame);
+}
+
+function resetSimulation() {
+  // Para y limpia
+  simState = 'idle';
+  cancelAnimationFrame(animationId);
+  animationId = null;
+
   cycleCount = 0;
   document.getElementById('cycleCounter').textContent = `Ciclos: ${cycleCount} - Tiempo: 0.00 s`;
+
   timeData = [];
   errorXData = [];
   errorYData = [];
@@ -321,22 +510,61 @@ function resetAnimation() {
   posYData = [];
   VData = [];
   WData = [];
-  const startX = parseFloat(document.getElementById('startX').value);
-  const startY = parseFloat(document.getElementById('startY').value);
-  const angle = parseFloat(document.getElementById('angle').value);
+  thetaDegData = [];
+  goalXData = [];
+  goalYData = [];
+
+  // UI
+  animateBtn.innerHTML = `<span id="animateIcon">&#9658;</span> Iniciar`;
+  setInputsEnabled(true);
+
+  // Volver a condiciones actuales del formulario
+  const startX = parseFloat(startXInput.value);
+  const startY = parseFloat(startYInput.value);
+  const angle = parseFloat(angleInput.value);
   robot.setInitialConditions(startX, startY, angle);
+
+  if (desired.source === 'manual') updateDesiredFromInputs();
+
   drawAllElements();
-  document.getElementById('animateBtn').innerHTML = `<span id="animateIcon">&#9658;</span> Iniciar`;
+  updateCharts(timeData, errorXData, errorYData, posXData, posYData, VData, WData, goalXData, goalYData);
 }
 
-function animate() {
+function animateFrame(ts) {
+  if (simState !== 'running') return;
+
+  if (lastTs === null) {
+    lastTs = ts;
+    animationId = requestAnimationFrame(animateFrame);
+    return;
+  }
+
+  let dtWall = (ts - lastTs) / 1000;
+  lastTs = ts;
+
+  // Evitar saltos enormes si la pestaña se durmió
+  if (dtWall > 0.25) dtWall = 0.25;
+
+  accumulator += dtWall;
+
+  let steps = 0;
+  while (accumulator >= robot.dt && steps < MAX_STEPS_PER_FRAME) {
+    doSimStep();
+    accumulator -= robot.dt;
+    steps++;
+  }
+
+  drawAllElements();
+  animationId = requestAnimationFrame(animateFrame);
+}
+
+function doSimStep() {
   cycleCount++;
   const t = cycleCount * robot.dt;
   document.getElementById('cycleCounter').textContent = `Ciclos: ${cycleCount} - Tiempo: ${t.toFixed(2)} s`;
-  const endX = parseFloat(document.getElementById('endX').value);
-  const endY = parseFloat(document.getElementById('endY').value);
-  const { ex, ey, V, W } = robot.calculateControl(endX, endY);
-  drawAllElements();
+
+  const { ex, ey, V, W } = robot.calculateControl(desired.x, desired.y);
+
   timeData.push(parseFloat(t.toFixed(2)));
   errorXData.push(ex);
   errorYData.push(ey);
@@ -344,8 +572,176 @@ function animate() {
   posYData.push(robot.y);
   VData.push(V);
   WData.push(W);
-  updateCharts(timeData, errorXData, errorYData, posXData, posYData, VData, WData);
-  animationId = requestAnimationFrame(animate);
+  thetaDegData.push(robot.theta * 180 / Math.PI);
+  goalXData.push(desired.x);
+  goalYData.push(desired.y);
+
+  updateCharts(timeData, errorXData, errorYData, posXData, posYData, VData, WData, goalXData, goalYData);
+}
+
+// --- MQTT
+function setMqttStatus(state, text) {
+  mqttStatusEl.textContent = text;
+  mqttStatusEl.classList.remove('offline', 'connecting', 'online');
+  mqttStatusEl.classList.add(state);
+}
+
+function mqttConnect() {
+  const url = (mqttUrlInput.value || '').trim();
+  const topic = (mqttTopicInput.value || '').trim();
+  if (!url || !topic) {
+    setMqttStatus('offline', 'URL/tópico vacío');
+    return;
+  }
+
+  // Si ya había cliente, cerrarlo antes
+  mqttDisconnect();
+
+  setMqttStatus('connecting', 'Conectando...');
+  mqttConnectBtn.textContent = 'Conectar';
+
+  try {
+    mqttClient = mqtt.connect(url, {
+      keepalive: 30,
+      reconnectPeriod: 1000,
+      connectTimeout: 8000,
+      clean: true
+    });
+  } catch (e) {
+    console.error(e);
+    setMqttStatus('offline', 'Error al crear cliente');
+    mqttClient = null;
+    mqttIsConnected = false;
+    return;
+  }
+
+  mqttClient.on('connect', () => {
+    mqttIsConnected = true;
+    setMqttStatus('online', 'Conectado');
+    mqttConnectBtn.textContent = 'Desconectar';
+    mqttResubscribe();
+  });
+
+  mqttClient.on('reconnect', () => {
+    setMqttStatus('connecting', 'Reconectando...');
+  });
+
+  mqttClient.on('close', () => {
+    mqttIsConnected = false;
+    setMqttStatus('offline', 'Desconectado');
+    mqttConnectBtn.textContent = 'Conectar';
+  });
+
+  mqttClient.on('error', (err) => {
+    console.error(err);
+    mqttIsConnected = false;
+    setMqttStatus('offline', 'Error MQTT');
+    mqttConnectBtn.textContent = 'Conectar';
+  });
+
+  mqttClient.on('message', (t, msg) => {
+    if (t !== mqttSubscribedTopic) return;
+    const payload = msg.toString();
+    const parsed = parseGoalPayload(payload);
+    if (!parsed) return;
+    setDesired(parsed.x, parsed.y, 'mqtt');
+  });
+}
+
+function mqttDisconnect() {
+  if (mqttClient) {
+    try {
+      mqttClient.end(true);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+  mqttClient = null;
+  mqttIsConnected = false;
+  mqttSubscribedTopic = '';
+  setMqttStatus('offline', 'Desconectado');
+  mqttConnectBtn.textContent = 'Conectar';
+}
+
+function mqttResubscribe() {
+  if (!mqttClient || !mqttIsConnected) return;
+
+  const topic = (mqttTopicInput.value || '').trim();
+  if (!topic) return;
+
+  // Si cambió el topic, re-suscribir
+  if (mqttSubscribedTopic && mqttSubscribedTopic !== topic) {
+    try { mqttClient.unsubscribe(mqttSubscribedTopic); } catch (e) {}
+  }
+
+  mqttSubscribedTopic = topic;
+
+  mqttClient.subscribe(topic, { qos: 0 }, (err) => {
+    if (err) {
+      console.error(err);
+      setMqttStatus('offline', 'Error al suscribir');
+    }
+  });
+}
+
+// Acepta {"x":100,"y":-50} o "100,-50" o "100 -50"
+function parseGoalPayload(payload) {
+  if (!payload) return null;
+  const s = String(payload).trim();
+  if (!s) return null;
+
+  // Intento JSON
+  try {
+    const obj = JSON.parse(s);
+    if (obj && Number.isFinite(obj.x) && Number.isFinite(obj.y)) {
+      return { x: Number(obj.x), y: Number(obj.y) };
+    }
+  } catch (_) {}
+
+  // Intento CSV/espacios
+  const parts = s.split(/[\s,;]+/).filter(Boolean);
+  if (parts.length >= 2) {
+    const x = Number(parts[0]);
+    const y = Number(parts[1]);
+    if (Number.isFinite(x) && Number.isFinite(y)) return { x, y };
+  }
+  return null;
+}
+
+// --- Descargas
+function downloadSessionCSV() {
+  if (!timeData.length) {
+    alert('No hay datos para guardar todavía. Inicia la simulación primero.');
+    return;
+  }
+
+  let csv = 't_s,x_mm,y_mm,theta_deg,ex_mm,ey_mm,V_mm_s,W_rad_s,xs_mm,ys_mm\n';
+  for (let i = 0; i < timeData.length; i++) {
+    const row = [
+      timeData[i],
+      posXData[i],
+      posYData[i],
+      thetaDegData[i],
+      errorXData[i],
+      errorYData[i],
+      VData[i],
+      WData[i],
+      goalXData[i],
+      goalYData[i]
+    ];
+    csv += row.join(',') + '\n';
+  }
+
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  const url = URL.createObjectURL(blob);
+  const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
+  link.href = url;
+  link.download = `robot_session_${ts}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 // Función para descargar la imagen actual del canvas de la animación
@@ -358,3 +754,6 @@ function downloadCanvas() {
   link.click();
   document.body.removeChild(link);
 }
+
+// Inicializa el modo en UI (por si el HTML cambia el "checked" por defecto)
+setTargetSource(document.querySelector('input[name="targetSource"]:checked')?.value || 'manual');

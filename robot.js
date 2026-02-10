@@ -5,7 +5,7 @@ class Robot {
     this.theta = 0; // en radianes
     this.l = 50; // distancia al punto de control
     this.k = 0.1; // ganancia de control
-    this.dt = 0.05; // paso de tiempo
+    this.dt = 0.1; // paso de tiempo
     this.trajectory = [];
   }
 
