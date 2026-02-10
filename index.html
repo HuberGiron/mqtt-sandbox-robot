@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Robot Móvil - Simulación</title>
+  <link rel="stylesheet" href="styles.css" />
+  <!-- Configuración de MathJax para ecuaciones en LaTeX -->
+  <script>
+  window.MathJax = {
+    tex: {
+      inlineMath: [['$', '$'], ['\\(', '\\)']],
+      displayMath: [['$$', '$$'], ['\\[', '\\]']],
+      processEscapes: true,
+      fontCache: 'global'
+    },
+    options: {
+      skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+    }
+  };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body>
+  <h1>Modelo Cinemático Robot Móvil</h1>
+  <h2>Convergencia Uniciclo</h2>
+  
+  <!-- Sección de cajas de contenido desplegables -->
+  <section class="info-boxes">
+    <!-- Introducción -->
+    <details open>
+      <summary>Introducción</summary>
+      <p>
+        Esta simulación ilustra la cinemática de robots móviles. El robot, cuya posición inicial se denota como <em>Xₒ</em> y <em>Yₒ</em> y cuya orientación es <em>Θ</em>, se desplaza hacia una posición deseada, denotada como <em>Xₛ</em> y <em>Yₛ</em>. El sistema de control actúa para minimizar el error entre la posición actual y la deseada, logrando que el robot converja de forma estable.
+      </p>
+    </details>
+    
+    <!-- Diagrama Cinemático -->
+    <details>
+      <summary>Diagrama Cinemático y de Convergencia</summary>
+      <div class="diagram-container">
+        <div class="diagram-text">
+          <p>
+            El diagrama muestra la configuración del robot:
+          </p>
+          <ul>
+            <li>Posición inicial: (<em>Xₒ</em>, <em>Yₒ</em>) y orientación <em>Θ</em>.</li>
+            <li>Posición deseada: (<em>Xₛ</em>, <em>Yₛ</em>).</li>
+            <li>Punto de extensión dinámica (<em>α</em>): Ubicado a una distancia <em>l</em> del centro del robot, se representa mediante las coordenadas (<em>p</em>, <em>q</em>).</li>
+          </ul>
+          <p>
+            Este diagrama ilustra cómo se utiliza el punto <em>α</em> para calcular el error y ajustar las velocidades.
+          </p>
+        </div>
+        <div class="diagram-image">
+          <img src="diagrama.png" alt="Diagrama Cinemático y de Convergencia" />
+        </div>
+      </div>
+    </details>
+    
+    <!-- Fórmulas de Control -->
+    <details>
+      <summary>Fórmulas de Control</summary>
+      <div class="equations">
+        <div class="equation">
+          <p>Error de Posición:</p>
+          <p class="math-equation">
+$$ 
+\begin{pmatrix} 
+e_x \\[0.3em]
+e_y 
+\end{pmatrix} 
+=
+\begin{pmatrix} 
+p - X_s \\[0.3em]
+q - Y_s 
+\end{pmatrix}
+$$
+          </p>
+        </div>
+        <div class="equation">
+          <p>Cálculo del Punto de Extensión Dinámica (α):</p>
+          <p class="math-equation">
+$$ 
+p = X_i + l \cdot \cos(\Theta)
+$$
+$$ 
+q = Y_i + l \cdot \sin(\Theta)
+$$
+          </p>
+        </div>
+        <div class="equation">
+          <p>Acción de Control:</p>
+          <p class="math-equation">
+$$ 
+\begin{pmatrix} 
+V \\[0.3em]
+W 
+\end{pmatrix} 
+=
+A^{-1} 
+\begin{pmatrix} 
+-k\, e_x \\[0.3em]
+-k\, e_y 
+\end{pmatrix}
+$$
+          </p>
+          <p>
+            donde <em>k</em> es la ganancia de control y <em>A</em> es una matriz dependiente de <em>Θ</em> y <em>l</em>.
+          </p>
+        </div>
+      </div>
+    </details>
+  </section>
+  
+  <!-- Controles de simulación -->
+  <div class="controls">
+    <div class="variable-inputs">
+      <label for="startX">X Inicial (mm):</label>
+      <input type="number" id="startX" value="-100">
+      <label for="startY">Y Inicial (mm):</label>
+      <input type="number" id="startY" value="-100">
+      <label for="angle">Ángulo Inicial (°):</label>
+      <input type="number" id="angle" value="0" step="1">
+      <label for="endX">X Final deseada (mm):</label>
+      <input type="number" id="endX" value="100">
+      <label for="endY">Y Final deseada (mm):</label>
+      <input type="number" id="endY" value="100">
+    </div>
+    <div class="constant-inputs">
+      <label for="k" class="constant-label">Ganancia K:</label>
+      <input type="number" id="k" value="0.5" step="0.01">
+      <label for="l" class="constant-label">Distancia l (mm):</label>
+      <input type="number" id="l" value="50" step="1">
+      <label for="dt" class="constant-label">Tiempo dt (s):</label>
+      <input type="number" id="dt" value="0.05" step="0.01">
+    </div>
+    <div class="button-controls">
+      <button id="animateBtn" class="control-button">
+        <span id="animateIcon">&#9658;</span> Iniciar y Pausa
+      </button>
+      <button id="restartBtn" class="control-button">
+        <span id="restartIcon">&#8635;</span> Reiniciar
+      </button>
+    </div>
+  </div>
+  
+  <div id="cycleCounter">Ciclos: 0 - Tiempo: 0.00 s</div>
+  
+  <div class="canvas-container">
+    <canvas id="robotCanvas"></canvas>
+  </div>
+  
+  <!-- Botón para descargar la imagen actual del canvas de la animación -->
+  <div class="download-buttons">
+    <button onclick="downloadCanvas()">Descargar Imagen de la Animación</button>
+  </div>
+  
+  <!-- Panel para mostrar información en tiempo real del robot -->
+  <div id="robotInfo"></div>
+  
+  <div class="chart-section">
+    <h3>Error vs Tiempo</h3>
+    <div class="chart-container">
+      <canvas id="errorChart"></canvas>
+    </div>
+    <div class="download-buttons">
+      <button onclick="downloadChart(errorChart, 'errorChart')">Descargar Gráfica</button>
+      <button onclick="downloadCSVForChart('error')">Descargar CSV</button>
+    </div>
+  </div>
+  
+  <div class="chart-section">
+    <h3>Posición vs Tiempo</h3>
+    <div class="chart-container">
+      <canvas id="positionChart"></canvas>
+    </div>
+    <div class="download-buttons">
+      <button onclick="downloadChart(positionChart, 'positionChart')">Descargar Gráfica</button>
+      <button onclick="downloadCSVForChart('position')">Descargar CSV</button>
+    </div>
+  </div>
+  
+  <div class="chart-section">
+    <h3>Control vs Tiempo</h3>
+    <div class="chart-container">
+      <canvas id="controlChart"></canvas>
+    </div>
+    <div class="download-buttons">
+      <button onclick="downloadChart(controlChart, 'controlChart')">Descargar Gráfica</button>
+      <button onclick="downloadCSVForChart('control')">Descargar CSV</button>
+    </div>
+  </div>
+  
+  <!-- Librería Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Nuestros scripts -->
+  <script src="robot.js"></script>
+  <script src="charts.js"></script>
+  <script src="canvas.js"></script>
+</body>
+</html>
