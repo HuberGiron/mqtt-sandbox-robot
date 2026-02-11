@@ -1,3 +1,12 @@
+// ===== Estilo responsivo (desktop vs móvil) =====
+const MOBILE_BP = 800; // mismo breakpoint que usas para la imagen
+const STYLE_DESKTOP = { pathPx: 8, dotPx: 12 };
+const STYLE_MOBILE  = { pathPx: 4,  dotPx: 8 };
+
+function currentStyle() {
+  return (window.innerWidth < MOBILE_BP) ? STYLE_MOBILE : STYLE_DESKTOP;
+}
+
 // Función para seleccionar la imagen adecuada según el ancho de la pantalla
 function chooseRobotImage() {
   // Si el ancho de pantalla es menor a 600, se usa la versión pequeña
@@ -20,14 +29,16 @@ function updateRobotImage() {
 const canvas = document.getElementById('robotCanvas');
 const ctx = canvas.getContext('2d');
 
-// Área de simulación: eje X de -300 a 300 y eje Y de -200 a 200
-const SIM_X_MIN = -300, SIM_X_MAX = 300;
-const SIM_Y_MIN = -200, SIM_Y_MAX = 200;
-const SIM_WIDTH = SIM_X_MAX - SIM_X_MIN;   // 600
-const SIM_HEIGHT = SIM_Y_MAX - SIM_Y_MIN;  // 400
+// Área de simulación (mm)
+const SIM_X_MIN = -500, SIM_X_MAX = 500;   // 1000 mm
+const SIM_Y_MIN = -300, SIM_Y_MAX = 300;   // 800 mm
+const SIM_WIDTH = SIM_X_MAX - SIM_X_MIN;   // 1000
+const SIM_HEIGHT = SIM_Y_MAX - SIM_Y_MIN;  // 800
+
 
 // Dimensiones originales del robot (en mm)
-const originalRobotWidth = 150;
+//const originalRobotWidth = 150;
+const originalRobotWidth = 220;
 
 // Estado de simulación
 let simState = 'idle'; // 'idle' | 'running' | 'paused'
@@ -184,19 +195,19 @@ function renderStaticLayer() {
     staticCtx.restore();
   }
 
-  // Ejes
-  staticCtx.strokeStyle = "#000000";
-  staticCtx.lineWidth = 2 / renderCache.scaleFactor;
+  // // Ejes
+  // staticCtx.strokeStyle = "#000000";
+  // staticCtx.lineWidth = 2 / renderCache.scaleFactor;
 
-  staticCtx.beginPath();
-  staticCtx.moveTo(SIM_X_MIN, 0);
-  staticCtx.lineTo(SIM_X_MAX, 0);
-  staticCtx.stroke();
+  // staticCtx.beginPath();
+  // staticCtx.moveTo(SIM_X_MIN, 0);
+  // staticCtx.lineTo(SIM_X_MAX, 0);
+  // staticCtx.stroke();
 
-  staticCtx.beginPath();
-  staticCtx.moveTo(0, SIM_Y_MIN);
-  staticCtx.lineTo(0, SIM_Y_MAX);
-  staticCtx.stroke();
+  // staticCtx.beginPath();
+  // staticCtx.moveTo(0, SIM_Y_MIN);
+  // staticCtx.lineTo(0, SIM_Y_MAX);
+  // staticCtx.stroke();
 
   staticCtx.restore();
 }
@@ -308,36 +319,33 @@ function updateCanvasSize() {
   const container = document.querySelector('.canvas-container');
   if (!container) return;
 
-  _dpr = 1;
+  // Tamaño visible (CSS pixels)
   visibleWidth = container.clientWidth;
-  visibleHeight = visibleWidth * (0.68);
+  visibleHeight = Math.round(visibleWidth * (SIM_HEIGHT / SIM_WIDTH)); // 0.8 exacto
+
+  // DPR real (nitidez)
+  _dpr = window.devicePixelRatio || 1;
 
   canvas.style.width = visibleWidth + 'px';
   canvas.style.height = visibleHeight + 'px';
 
-  canvas.width = visibleWidth;
-  canvas.height = visibleHeight;
+  // Tamaño interno (device pixels)
+  canvas.width = Math.round(visibleWidth * _dpr);
+  canvas.height = Math.round(visibleHeight * _dpr);
 
-  resetTransformSafe(ctx);
-  ctx.scale(_dpr, _dpr);
+  // Configuración de render
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.imageSmoothingEnabled = true;
 
-  const actualWidth = canvas.width;
-  const referenceValue = visibleWidth < 600 ? 450 : 900;
-  config.robotWidth = originalRobotWidth * (actualWidth / referenceValue);
+  // Robot en mm (NO escalar por pantalla: se verá “como en Python”)
+  config.robotWidth = originalRobotWidth; // puedes subir a 180/200 si lo quieres más grande
   if (robotImg.complete) {
-    config.robotHeight = robotImg.height * config.robotWidth / robotImg.width;
+    config.robotHeight = (robotImg.height * config.robotWidth) / robotImg.width;
   }
 
-  // Preparar caches/capas offscreen
-  updateRenderCache();
-  resizeOffscreenLayers();
-  renderStaticLayer();
-  rebuildTrailFromTrajectory();
-
   drawAllElements();
-  maybeUpdateRobotInfo(performance.now(), true);
 }
+
 
 
 let resizeTimeout;
@@ -499,21 +507,143 @@ function updatePreview() {
 
 // --- Dibujo
 function drawAllElements() {
-  // Composición en 3 capas: fondo fijo + trayectoria + elementos dinámicos
-  resetTransformSafe(ctx);
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // Escala: px por mm (en CSS px)
+  const s = visibleWidth / SIM_WIDTH; // mismo para X e Y
+  const cx = visibleWidth / 2;
+  const cy = visibleHeight / 2;
 
-  if (staticLayer.width) ctx.drawImage(staticLayer, 0, 0);
-  if (trailLayer.width) ctx.drawImage(trailLayer, 0, 0);
+  // ===== 1) Capa “screen space” (crisp) =====
+  // De aquí en adelante, coordenadas en CSS px
+  ctx.setTransform(_dpr, 0, 0, _dpr, 0, 0);
+  ctx.clearRect(0, 0, visibleWidth, visibleHeight);
 
-  ctx.setTransform(renderCache.scaleFactor, 0, 0, -renderCache.scaleFactor, renderCache.cx, renderCache.cy);
+  // Fondo (como “plot area”)
+  const g = ctx.createLinearGradient(0, 0, visibleWidth, visibleHeight);
+  g.addColorStop(0, "#ffffff");
+  g.addColorStop(1, "#f8f8f8");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, visibleWidth, visibleHeight);
+
+  // Grid + ticks + marco (estilo matplotlib)
+  drawGridScreen(s, cx, cy);
+  drawFrameAndAxesLabels();
+
+  // ===== 2) Capa “world space” (robot/trayectoria) =====
+  // Transform mundo(mm) -> pixels internos
+  const S = s * _dpr;
+  ctx.setTransform(S, 0, 0, -S, cx * _dpr, cy * _dpr);
+
+  drawTrajectory(s);
   drawRobot();
-  drawPointsCircles();
+  drawPointsCircles(s);
 
-  resetTransformSafe(ctx);
-  drawPointsLabels();
+  // ===== 3) Etiquetas (screen space) =====
+  ctx.setTransform(_dpr, 0, 0, _dpr, 0, 0);
+  drawPointsLabelsScreen(s, cx, cy);
+
+  updateRobotInfo();
 }
 
+function niceStep(range, targetTicks = 5) {
+  const raw = range / targetTicks;
+  const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+  const candidates = [1, 2, 2.5, 5, 10].map(m => m * pow);
+  let best = candidates[0];
+  for (const c of candidates) {
+    if (Math.abs(raw - c) < Math.abs(raw - best)) best = c;
+  }
+  return best;
+}
+
+function simToScreen(x, y, s, cx, cy) {
+  return { x: cx + x * s, y: cy - y * s };
+}
+
+function drawGridScreen(s, cx, cy) {
+  const rangeX = SIM_WIDTH;
+  const rangeY = SIM_HEIGHT;
+
+  const major = 100;   // etiquetas + grid fuerte cada 100
+  const minor = major / 2;                             // ~100
+
+  // Líneas (en screen px) — alinear a media celda para crispness
+  const drawV = (xPx) => {
+    const xx = Math.round(xPx) + 0.5;
+    ctx.beginPath(); ctx.moveTo(xx, 0); ctx.lineTo(xx, visibleHeight); ctx.stroke();
+  };
+  const drawH = (yPx) => {
+    const yy = Math.round(yPx) + 0.5;
+    ctx.beginPath(); ctx.moveTo(0, yy); ctx.lineTo(visibleWidth, yy); ctx.stroke();
+  };
+
+  // Minor grid
+  ctx.save();
+  ctx.strokeStyle = "#e6e6e6";
+  ctx.lineWidth = 1;
+
+  for (let x = Math.ceil(SIM_X_MIN / minor) * minor; x <= SIM_X_MAX; x += minor) {
+    const p = simToScreen(x, 0, s, cx, cy);
+    drawV(p.x);
+  }
+  for (let y = Math.ceil(SIM_Y_MIN / minor) * minor; y <= SIM_Y_MAX; y += minor) {
+    const p = simToScreen(0, y, s, cx, cy);
+    drawH(p.y);
+  }
+  ctx.restore();
+
+  // Major grid + tick labels
+  ctx.save();
+  ctx.strokeStyle = "#c7c7c7";
+  ctx.lineWidth = 1.25;
+
+  // Ticks (solo en major, sin “mm” como matplotlib)
+  ctx.fillStyle = "#000";
+  ctx.font = "14px Arial";
+
+  // X major
+  for (let x = Math.ceil(SIM_X_MIN / major) * major; x <= SIM_X_MAX; x += major) {
+    const p = simToScreen(x, 0, s, cx, cy);
+    drawV(p.x);
+
+    // etiqueta abajo (evita bordes)
+    if (p.x > 28 && p.x < visibleWidth - 28) {
+      ctx.fillText(String(Math.round(x)), p.x - 14, visibleHeight - 10);
+    }
+  }
+
+  // Y major
+  for (let y = Math.ceil(SIM_Y_MIN / major) * major; y <= SIM_Y_MAX; y += major) {
+    const p = simToScreen(0, y, s, cx, cy);
+    drawH(p.y);
+
+    if (p.y > 18 && p.y < visibleHeight - 18) {
+      ctx.fillText(String(Math.round(y)), 10, p.y + 5);
+    }
+  }
+
+  ctx.restore();
+}
+
+function drawFrameAndAxesLabels() {
+  // Marco tipo matplotlib (negro fino, sin sombra)
+  ctx.save();
+  ctx.strokeStyle = "#000";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(0.5, 0.5, visibleWidth - 1, visibleHeight - 1);
+
+  // Labels ejes
+  ctx.fillStyle = "#000";
+  ctx.font = "italic 16px Arial";
+  ctx.fillText("x (mm)", visibleWidth / 2 - 24, visibleHeight - 28);
+
+  ctx.save();
+  ctx.translate(45, visibleHeight / 2 + 24);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText("y (mm)", 0, 0);
+  ctx.restore();
+
+  ctx.restore();
+}
 
 function drawGrid() {
   ctx.save();
@@ -569,22 +699,25 @@ function drawGrid() {
 function drawRobot() {
   const pos = robot.getCurrentPosition();
   ctx.save();
-  ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
-  ctx.shadowBlur = 10;
+  // ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
+  // ctx.shadowBlur = 10;
   ctx.translate(pos.x, pos.y);
   ctx.rotate(robot.theta);
   ctx.drawImage(robotImg, robot.l - config.robotWidth, -config.robotHeight / 2, config.robotWidth, config.robotHeight);
   ctx.restore();
 }
 
-function drawTrajectory() {
+function drawTrajectory(s) {
   const trajectory = robot.getTrajectory();
   if (trajectory.length < 2) return;
+
   ctx.save();
-  const actualWidth = canvas.width;
-  const scaleFactor = actualWidth / SIM_WIDTH;
-  ctx.lineWidth = 3 / scaleFactor;
-  ctx.strokeStyle = '#ff0000';
+  ctx.strokeStyle = "#ff0000";
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+
+  const { pathPx } = currentStyle();
+  ctx.lineWidth = pathPx / (_dpr * s);  // px visibles constantes
 
   ctx.beginPath();
   ctx.moveTo(trajectory[0].x, trajectory[0].y);
@@ -595,60 +728,53 @@ function drawTrajectory() {
   ctx.restore();
 }
 
-function drawPointsCircles() {
-  const startX = parseFloat(startXInput.value);
-  const startY = parseFloat(startYInput.value);
 
-  // Ojo: el "punto deseado" siempre se toma del UI (se actualiza desde MQTT cuando aplica)
-  const endX = parseFloat(endXInput.value);
-  const endY = parseFloat(endYInput.value);
+function drawPointsLabelsScreen(s, cx, cy) {
+  const startX = parseFloat(document.getElementById('startX').value);
+  const startY = parseFloat(document.getElementById('startY').value);
+  const endX = parseFloat(document.getElementById('endX').value);
+  const endY = parseFloat(document.getElementById('endY').value);
 
-  drawCircle(startX, startY, '#00FF00');
-  drawCircle(endX, endY, '#0000FF');
+  const p0 = simToScreen(startX, startY, s, cx, cy);
+  const p1 = simToScreen(endX, endY, s, cx, cy);
 
-  const extPoint = robot.getExtensionPoint();
-  drawCircle(extPoint.x, extPoint.y, '#FF0000');
+  ctx.save();
+  // ctx.fillStyle = "#000";
+  // ctx.font = "bold 16px Arial";
+  // ctx.fillText("(Xo, Yo)", p0.x + 10, p0.y - 10);
+  // ctx.fillText("(Xs, Ys)", p1.x + 10, p1.y - 10);
+  ctx.restore();
 }
 
-function drawCircle(x, y, color) {
+
+function drawCircle(x, y, color, s) {
   ctx.beginPath();
-  const actualWidth = canvas.width;
-  const scaleFactor = actualWidth / SIM_WIDTH;
-  ctx.arc(x, y, 3 / scaleFactor, 0, Math.PI * 2);
+  const { dotPx } = currentStyle();
+  const rPx = dotPx;
+  ctx.arc(x, y, rPx / (_dpr * s), 0, Math.PI * 2);
   ctx.fillStyle = color;
   ctx.fill();
 }
 
-function drawPointsLabels() {
-  const actualWidth = canvas.width;
-  const scaleFactor = actualWidth / SIM_WIDTH;
-  const cx = actualWidth / 2;
-  const cy = canvas.height / 2;
+function drawPointsCircles(s) {
+  const startX = parseFloat(document.getElementById('startX').value);
+  const startY = parseFloat(document.getElementById('startY').value);
+  const endX = parseFloat(document.getElementById('endX').value);
+  const endY = parseFloat(document.getElementById('endY').value);
 
-  const startX = parseFloat(startXInput.value);
-  const startY = parseFloat(startYInput.value);
-  const endX = parseFloat(endXInput.value);
-  const endY = parseFloat(endYInput.value);
+  drawCircle(startX, startY, '#FF0000', s);
+  drawCircle(endX, endY, '#0044FF', s);
 
-  const startCanvasX = cx + startX * scaleFactor;
-  const startCanvasY = cy - startY * scaleFactor;
-  const endCanvasX = cx + endX * scaleFactor;
-  const endCanvasY = cy - endY * scaleFactor;
-
-  ctx.save();
-  ctx.resetTransform();
-  ctx.font = 'bold 14px Arial';
-  ctx.fillStyle = '#000000';
-  ctx.fillText('(Xo, Yo)', startCanvasX + 10, startCanvasY - 10);
-  ctx.fillText('(Xs, Ys)', endCanvasX + 10, endCanvasY - 10);
-  ctx.restore();
+  const extPoint = robot.getExtensionPoint();
+  drawCircle(extPoint.x, extPoint.y, '#FF0000', s);
 }
 
 function updateRobotInfo() {
   const pos = robot.getCurrentPosition();
   document.getElementById('robotInfo').textContent =
-    `Posición: (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}) | Ángulo: ${(robot.theta * 180 / Math.PI).toFixed(1)}° | Objetivo(${desired.source.toUpperCase()}): (${desired.x.toFixed(0)}, ${desired.y.toFixed(0)})`;
-}
+    // `Posición: (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}) | Ángulo: ${(robot.theta * 180 / Math.PI).toFixed(1)}° | Objetivo(${desired.source.toUpperCase()}): (${desired.x.toFixed(0)}, ${desired.y.toFixed(0)})`;
+    `Posición: (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}) | Ángulo: ${(robot.theta * 180 / Math.PI).toFixed(1)}° | Objetivo: (${desired.x.toFixed(0)}, ${desired.y.toFixed(0)})`;
+  }
 
 // --- Simulación (start/pause/resume)
 function toggleSimulation() {

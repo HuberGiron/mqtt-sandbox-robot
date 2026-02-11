@@ -97,20 +97,24 @@ input {
   font-weight: bold;
 }
 
+/* Canvas más ancho (≈ 80–95% del viewport) */
 .canvas-container {
-  width: 100%;
-  max-width: 700px;
+  width: 92vw;          /* usa ~92% del ancho de la pantalla */
+  max-width: 1400px;    /* límite razonable en monitores grandes */
   margin: 0 auto;
 }
 
-#robotCanvas {
-  width: 100%;
-  height: auto;
-  display: block;
-  border: 2px solid #cc0000;
-  border-radius: 8px;
-  background-color: white;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+@media (max-width: 600px) {
+  .canvas-container { width: 100vw; }
+}
+
+
+
+#robotCanvas{
+  border: 1px solid #000;
+  border-radius: 0;
+  box-shadow: none;
+  background: #fff;
 }
 
 .chart-container {
@@ -307,4 +311,139 @@ input {
   padding: 1px 6px;
   border-radius: 4px;
   border: 1px solid #ddd;
+}
+
+/* =========================
+   UI polish: Target source + MQTT + layout
+   (pegar al final de styles.css)
+   ========================= */
+
+/* Mejor box model para que inputs/botones cuadren */
+* { box-sizing: border-box; }
+
+/* Inputs al 100% (antes estaban a 90%) */
+input { width: 100%; }
+
+/* Alinear anchos de las secciones principales */
+.info-boxes, .controls, .chart-section, #robotInfo {
+  width: 90%;
+  max-width: 800px;
+  margin-left: auto;
+  margin-right: auto;
+}
+@media (min-width: 768px) {
+  .info-boxes, .controls, .chart-section, #robotInfo { width: 80%; }
+}
+
+/* Tu HTML trae un <br> después del target-source; lo quitamos visualmente */
+.info-boxes > br { display: none; }
+
+/* ===== Target source (Manual/MQTT) como "card" siempre visible ===== */
+.target-source {
+  margin: 0 0 12px 0;
+  padding: 12px 12px;
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  background: #fff;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.target-source .constant-label {
+  margin: 0;
+  font-weight: 700;
+  color: #111;
+}
+
+.radio-row {
+  margin-top: 0;               /* evita el salto vertical extra */
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.radio-row input[type="radio"] {
+  accent-color: #cc0000;       /* color institucional para radios */
+}
+
+.radio-row label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid #e3e3e3;
+  border-radius: 999px;
+  background: #fafafa;
+  margin: 0;
+}
+
+@media (max-width: 600px) {
+  .target-source {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .radio-row { width: 100%; }
+}
+
+/* ===== <details> de "Controles de simulación" más limpio ===== */
+.info-boxes details {
+  border-radius: 10px;
+  overflow: hidden;
+}
+.info-boxes summary {
+  padding: 10px 12px;
+  font-weight: 700;
+}
+.info-boxes details[open] summary {
+  border-bottom: 1px solid rgba(255,255,255,0.25);
+}
+
+/* Dentro del details: evita márgenes innecesarios */
+.diagram-container .controls { margin-bottom: 0; }
+
+/* Tarjetas de inputs con borde suave */
+.variable-inputs, .constant-inputs {
+  border: 1px solid #eee;
+}
+.constant-inputs { background-color: #fbfbfb; }
+
+/* ===== Panel MQTT como card ===== */
+.mqtt-panel {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.mqtt-row {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.small-button:active,
+.control-button:active {
+  transform: translateY(1px);
+}
+
+/* ===== Panel de info del robot ===== */
+#robotInfo {
+  text-align: center;
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 10px;
+}
+
+/* ===== Botones de control (3 columnas) con “look” consistente ===== */
+.button-controls { margin-top: 12px; }
+.control-button { border-radius: 10px; }
+
+/* Responsive: una columna de botones en móvil */
+@media (max-width: 600px) {
+  .button-controls { grid-template-columns: 1fr; }
 }
