@@ -64,6 +64,228 @@ let thetaDegData = [];
 let goalXData = [];
 let goalYData = [];
 
+
+// --- Rendimiento / visualización
+// Mantener una ventana acotada de puntos para las gráficas (evita que Chart.js se vuelva lento)
+const MAX_PLOT_POINTS = 1200;     // puntos visibles en charts
+const PLOT_TRIM_CHUNK = 300;      // recorte por bloques para evitar shift() por frame
+const CHART_UPDATE_MS = 120;      // ~8 Hz (suficiente para ver en vivo sin cargar CPU)
+
+let timePlot = [];
+let errorXPlot = [];
+let errorYPlot = [];
+let posXPlot = [];
+let posYPlot = [];
+let VPlot = [];
+let WPlot = [];
+let goalXPlot = [];
+let goalYPlot = [];
+
+let chartsDirty = false;
+let lastChartUpdateTs = 0;
+
+const INFO_UPDATE_MS = 120;       // throttling de panel de info del robot
+let lastInfoUpdateTs = 0;
+
+// Capas offscreen: (1) fondo+grid fijo, (2) trayectoria incremental
+const staticLayer = document.createElement('canvas');
+const staticCtx = staticLayer.getContext('2d');
+
+const trailLayer = document.createElement('canvas');
+const trailCtx = trailLayer.getContext('2d');
+
+let renderCache = { scaleFactor: 1, cx: 0, cy: 0, w: 0, h: 0 };
+
+function resetTransformSafe(c) {
+  if (typeof c.resetTransform === 'function') c.resetTransform();
+  else c.setTransform(1, 0, 0, 1, 0, 0);
+}
+
+function updateRenderCache() {
+  const actualWidth = canvas.width;
+  const actualHeight = canvas.height;
+  renderCache.w = actualWidth;
+  renderCache.h = actualHeight;
+  renderCache.scaleFactor = actualWidth / SIM_WIDTH;
+  renderCache.cx = actualWidth / 2;
+  renderCache.cy = actualHeight / 2;
+}
+
+function simToPx(x, y) {
+  // Mapeo equivalente a: setTransform(scaleFactor,0,0,-scaleFactor,cx,cy)
+  return {
+    px: renderCache.cx + x * renderCache.scaleFactor,
+    py: renderCache.cy - y * renderCache.scaleFactor
+  };
+}
+
+function resizeOffscreenLayers() {
+  if (staticLayer.width !== canvas.width || staticLayer.height !== canvas.height) {
+    staticLayer.width = canvas.width;
+    staticLayer.height = canvas.height;
+  }
+  if (trailLayer.width !== canvas.width || trailLayer.height !== canvas.height) {
+    trailLayer.width = canvas.width;
+    trailLayer.height = canvas.height;
+  }
+}
+
+function renderStaticLayer() {
+  // Fondo y rejilla: se redibuja SOLO cuando cambia el tamaño del canvas
+  resetTransformSafe(staticCtx);
+  staticCtx.clearRect(0, 0, staticLayer.width, staticLayer.height);
+
+  staticCtx.setTransform(renderCache.scaleFactor, 0, 0, -renderCache.scaleFactor, renderCache.cx, renderCache.cy);
+
+  // Fondo
+  staticCtx.save();
+  const grd = staticCtx.createLinearGradient(SIM_X_MIN, SIM_Y_MIN, SIM_X_MAX, SIM_Y_MAX);
+  grd.addColorStop(0, '#ffffff');
+  grd.addColorStop(1, '#f8f8f8');
+  staticCtx.fillStyle = grd;
+  staticCtx.fillRect(SIM_X_MIN, SIM_Y_MIN, SIM_WIDTH, SIM_HEIGHT);
+  staticCtx.restore();
+
+  // Grid (tomado de drawGrid, pero en la capa offscreen)
+  staticCtx.save();
+  staticCtx.strokeStyle = "#e0e0e0";
+  staticCtx.lineWidth = 1 / renderCache.scaleFactor;
+  staticCtx.font = '14px Arial';
+  staticCtx.fillStyle = '#000000';
+
+  const margin = 20;
+  const divisions = 10;
+  const stepX = (SIM_X_MAX - SIM_X_MIN) / divisions;
+  const stepY = (SIM_Y_MAX - SIM_Y_MIN) / divisions;
+
+  for (let i = 0; i <= divisions; i++) {
+    const x = SIM_X_MIN + i * stepX;
+    staticCtx.beginPath();
+    staticCtx.moveTo(x, SIM_Y_MIN);
+    staticCtx.lineTo(x, SIM_Y_MAX);
+    staticCtx.stroke();
+
+    staticCtx.save();
+    staticCtx.scale(1, -1);
+    staticCtx.fillText(x.toFixed(0), x, -(SIM_Y_MIN) + margin);
+    staticCtx.restore();
+  }
+
+  for (let i = 0; i <= divisions; i++) {
+    const y = SIM_Y_MIN + i * stepY;
+    staticCtx.beginPath();
+    staticCtx.moveTo(SIM_X_MIN, y);
+    staticCtx.lineTo(SIM_X_MAX, y);
+    staticCtx.stroke();
+
+    staticCtx.save();
+    staticCtx.scale(1, -1);
+    staticCtx.fillText(y.toFixed(0), SIM_X_MIN + margin, -y);
+    staticCtx.restore();
+  }
+
+  // Ejes
+  staticCtx.strokeStyle = "#000000";
+  staticCtx.lineWidth = 2 / renderCache.scaleFactor;
+
+  staticCtx.beginPath();
+  staticCtx.moveTo(SIM_X_MIN, 0);
+  staticCtx.lineTo(SIM_X_MAX, 0);
+  staticCtx.stroke();
+
+  staticCtx.beginPath();
+  staticCtx.moveTo(0, SIM_Y_MIN);
+  staticCtx.lineTo(0, SIM_Y_MAX);
+  staticCtx.stroke();
+
+  staticCtx.restore();
+}
+
+function clearTrailLayer() {
+  resetTransformSafe(trailCtx);
+  trailCtx.clearRect(0, 0, trailLayer.width, trailLayer.height);
+}
+
+function rebuildTrailFromTrajectory() {
+  // Se usa SOLO en resize o reinicios; la trayectoria está acotada en robot.js
+  clearTrailLayer();
+  const traj = robot.getTrajectory?.() || [];
+  if (!traj || traj.length < 2) return;
+
+  trailCtx.save();
+  trailCtx.lineWidth = 3;
+  trailCtx.strokeStyle = '#ff0000';
+  trailCtx.lineJoin = 'round';
+  trailCtx.lineCap = 'round';
+
+  trailCtx.beginPath();
+  const p0 = simToPx(traj[0].x, traj[0].y);
+  trailCtx.moveTo(p0.px, p0.py);
+
+  for (let i = 1; i < traj.length; i++) {
+    const p = simToPx(traj[i].x, traj[i].y);
+    trailCtx.lineTo(p.px, p.py);
+  }
+  trailCtx.stroke();
+  trailCtx.restore();
+}
+
+function addTrailSegment(x0, y0, x1, y1) {
+  // Dibuja incrementalmente SOLO el último segmento (O(1) por paso)
+  const p0 = simToPx(x0, y0);
+  const p1 = simToPx(x1, y1);
+
+  trailCtx.save();
+  trailCtx.lineWidth = 3;
+  trailCtx.strokeStyle = '#ff0000';
+  trailCtx.lineJoin = 'round';
+  trailCtx.lineCap = 'round';
+
+  trailCtx.beginPath();
+  trailCtx.moveTo(p0.px, p0.py);
+  trailCtx.lineTo(p1.px, p1.py);
+  trailCtx.stroke();
+  trailCtx.restore();
+}
+
+function trimPlotDataIfNeeded() {
+  // Recorta por bloques para mantener rendimiento y evitar operaciones O(n) cada ciclo
+  if (timePlot.length <= MAX_PLOT_POINTS + PLOT_TRIM_CHUNK) return;
+  const removeN = timePlot.length - MAX_PLOT_POINTS;
+  const n = Math.min(removeN, PLOT_TRIM_CHUNK);
+
+  timePlot.splice(0, n);
+  errorXPlot.splice(0, n);
+  errorYPlot.splice(0, n);
+  posXPlot.splice(0, n);
+  posYPlot.splice(0, n);
+  VPlot.splice(0, n);
+  WPlot.splice(0, n);
+  goalXPlot.splice(0, n);
+  goalYPlot.splice(0, n);
+}
+
+function maybeUpdateCharts(ts, force = false) {
+  if (!chartsDirty && !force) return;
+  if (!force && (ts - lastChartUpdateTs) < CHART_UPDATE_MS) return;
+
+  // Alimenta explícitamente las gráficas con los arrays *acotados* (Plot arrays)
+  // para mantener rendimiento y evitar desincronizaciones si hay recortes.
+  updateCharts(
+    'none'
+  );
+  
+  chartsDirty = false;
+  lastChartUpdateTs = ts;
+}
+
+function maybeUpdateRobotInfo(ts, force = false) {
+  if (!force && (ts - lastInfoUpdateTs) < INFO_UPDATE_MS) return;
+  updateRobotInfo();
+  lastInfoUpdateTs = ts;
+}
+
+
 // Objetivo deseado (manual o MQTT)
 const desired = {
   x: 100,
@@ -84,30 +306,39 @@ function clamp(v, min, max) {
 // Función para ajustar el tamaño del canvas según el contenedor
 function updateCanvasSize() {
   const container = document.querySelector('.canvas-container');
-  if (container) {
-    _dpr = 1;
-    visibleWidth = container.clientWidth;
-    visibleHeight = visibleWidth * (0.68);  // Ajustado a 0.68
+  if (!container) return;
 
-    canvas.style.width = visibleWidth + 'px';
-    canvas.style.height = visibleHeight + 'px';
+  _dpr = 1;
+  visibleWidth = container.clientWidth;
+  visibleHeight = visibleWidth * (0.68);
 
-    canvas.width = visibleWidth;
-    canvas.height = visibleHeight;
+  canvas.style.width = visibleWidth + 'px';
+  canvas.style.height = visibleHeight + 'px';
 
-    ctx.resetTransform();
-    ctx.scale(_dpr, _dpr);
-    ctx.imageSmoothingEnabled = true;
+  canvas.width = visibleWidth;
+  canvas.height = visibleHeight;
 
-    const actualWidth = canvas.width;
-    const referenceValue = visibleWidth < 600 ? 450 : 900;
-    config.robotWidth = originalRobotWidth * (actualWidth / referenceValue);
-    if (robotImg.complete) {
-      config.robotHeight = robotImg.height * config.robotWidth / robotImg.width;
-    }
-    drawAllElements();
+  resetTransformSafe(ctx);
+  ctx.scale(_dpr, _dpr);
+  ctx.imageSmoothingEnabled = true;
+
+  const actualWidth = canvas.width;
+  const referenceValue = visibleWidth < 600 ? 450 : 900;
+  config.robotWidth = originalRobotWidth * (actualWidth / referenceValue);
+  if (robotImg.complete) {
+    config.robotHeight = robotImg.height * config.robotWidth / robotImg.width;
   }
+
+  // Preparar caches/capas offscreen
+  updateRenderCache();
+  resizeOffscreenLayers();
+  renderStaticLayer();
+  rebuildTrailFromTrajectory();
+
+  drawAllElements();
+  maybeUpdateRobotInfo(performance.now(), true);
 }
+
 
 let resizeTimeout;
 window.addEventListener('resize', () => {
@@ -186,7 +417,7 @@ robotImg.onload = () => {
   updateCanvasSize();
   updateDesiredFromInputs(); // set initial desired from UI
   updatePreview(); // aplica condiciones iniciales (solo si idle)
-  initCharts(timeData, errorXData, errorYData, posXData, posYData, VData, WData, goalXData, goalYData);
+  initCharts(timePlot, errorXPlot, errorYPlot, posXPlot, posYPlot, VPlot, WPlot, goalXPlot, goalYPlot);
 };
 
 // --- Lógica de objetivo (manual/MQTT)
@@ -255,39 +486,34 @@ function updatePreview() {
     updateDesiredFromInputs();
   }
 
+  // Reinicia trayectoria visual (offscreen) para que no se re-dibuje todo cada frame
+  updateRenderCache();
+  resizeOffscreenLayers();
+  renderStaticLayer();
+  rebuildTrailFromTrajectory();
+
   drawAllElements();
+  maybeUpdateRobotInfo(performance.now(), true);
 }
+
 
 // --- Dibujo
 function drawAllElements() {
+  // Composición en 3 capas: fondo fijo + trayectoria + elementos dinámicos
+  resetTransformSafe(ctx);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  const actualWidth = canvas.width;
-  const actualHeight = canvas.height;
-  let scaleFactor = actualWidth / SIM_WIDTH;
-  const cx = actualWidth / 2;
-  const cy = actualHeight / 2;
+  if (staticLayer.width) ctx.drawImage(staticLayer, 0, 0);
+  if (trailLayer.width) ctx.drawImage(trailLayer, 0, 0);
 
-  ctx.setTransform(scaleFactor, 0, 0, -scaleFactor, cx, cy);
-
-  ctx.save();
-  const grd = ctx.createLinearGradient(SIM_X_MIN, SIM_Y_MIN, SIM_X_MAX, SIM_Y_MAX);
-  grd.addColorStop(0, '#ffffff');
-  grd.addColorStop(1, '#f8f8f8');
-  ctx.fillStyle = grd;
-  ctx.fillRect(SIM_X_MIN, SIM_Y_MIN, SIM_WIDTH, SIM_HEIGHT);
-  ctx.restore();
-
-  drawGrid();
-  drawTrajectory();
+  ctx.setTransform(renderCache.scaleFactor, 0, 0, -renderCache.scaleFactor, renderCache.cx, renderCache.cy);
   drawRobot();
   drawPointsCircles();
 
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  resetTransformSafe(ctx);
   drawPointsLabels();
-
-  updateRobotInfo();
 }
+
 
 function drawGrid() {
   ctx.save();
@@ -448,34 +674,54 @@ function startSimulation() {
   // Congelar parámetros iniciales
   updatePreview(); // aplica robot.setInitialConditions + k,l,dt (solo si idle)
 
-  // Reset de datos de sesión
+  // Reset de datos de sesión (mantener referencias; NO reasignar arrays)
   cycleCount = 0;
-  timeData = [];
-  errorXData = [];
-  errorYData = [];
-  posXData = [];
-  posYData = [];
-  VData = [];
-  WData = [];
-  thetaDegData = [];
-  goalXData = [];
-  goalYData = [];
+
+  timeData.length = 0;
+  errorXData.length = 0;
+  errorYData.length = 0;
+  posXData.length = 0;
+  posYData.length = 0;
+  VData.length = 0;
+  WData.length = 0;
+  thetaDegData.length = 0;
+  goalXData.length = 0;
+  goalYData.length = 0;
+
+  timePlot.length = 0;
+  errorXPlot.length = 0;
+  errorYPlot.length = 0;
+  posXPlot.length = 0;
+  posYPlot.length = 0;
+  VPlot.length = 0;
+  WPlot.length = 0;
+  goalXPlot.length = 0;
+  goalYPlot.length = 0;
+
+  chartsDirty = true;
+  lastChartUpdateTs = 0;
 
   // Reset acumuladores de tiempo
   lastTs = null;
   accumulator = 0;
+
+  // Limpia trayectoria visual
+  updateRenderCache();
+  resizeOffscreenLayers();
+  renderStaticLayer();
+  clearTrailLayer(); // la trayectoria se dibuja incrementalmente en doSimStep()
 
   // UI
   simState = 'running';
   animateBtn.innerHTML = `<span id="animateIcon">&#10074;&#10074;</span> Pausa`;
   setInputsEnabled(false);
 
-  // (Re)inicializar charts con referencias nuevas
-  // Nota: initCharts ya se llamó una vez; aquí solo actualizamos (mantiene instancias)
-  updateCharts(timeData, errorXData, errorYData, posXData, posYData, VData, WData, goalXData, goalYData);
+  // Forzar charts vacíos en pantalla
+  maybeUpdateCharts(performance.now(), true);
 
   animationId = requestAnimationFrame(animateFrame);
 }
+
 
 function pauseSimulation() {
   simState = 'paused';
@@ -503,16 +749,29 @@ function resetSimulation() {
   cycleCount = 0;
   document.getElementById('cycleCounter').textContent = `Ciclos: ${cycleCount} - Tiempo: 0.00 s`;
 
-  timeData = [];
-  errorXData = [];
-  errorYData = [];
-  posXData = [];
-  posYData = [];
-  VData = [];
-  WData = [];
-  thetaDegData = [];
-  goalXData = [];
-  goalYData = [];
+  timeData.length = 0;
+  errorXData.length = 0;
+  errorYData.length = 0;
+  posXData.length = 0;
+  posYData.length = 0;
+  VData.length = 0;
+  WData.length = 0;
+  thetaDegData.length = 0;
+  goalXData.length = 0;
+  goalYData.length = 0;
+
+  timePlot.length = 0;
+  errorXPlot.length = 0;
+  errorYPlot.length = 0;
+  posXPlot.length = 0;
+  posYPlot.length = 0;
+  VPlot.length = 0;
+  WPlot.length = 0;
+  goalXPlot.length = 0;
+  goalYPlot.length = 0;
+
+  chartsDirty = true;
+  lastChartUpdateTs = 0;
 
   // UI
   animateBtn.innerHTML = `<span id="animateIcon">&#9658;</span> Iniciar`;
@@ -526,9 +785,17 @@ function resetSimulation() {
 
   if (desired.source === 'manual') updateDesiredFromInputs();
 
+  // Re-render fondo + limpiar trayectoria
+  updateRenderCache();
+  resizeOffscreenLayers();
+  renderStaticLayer();
+  clearTrailLayer();
+
   drawAllElements();
-  updateCharts(timeData, errorXData, errorYData, posXData, posYData, VData, WData, goalXData, goalYData);
+  maybeUpdateCharts(performance.now(), true);
+  maybeUpdateRobotInfo(performance.now(), true);
 }
+
 
 function animateFrame(ts) {
   if (simState !== 'running') return;
@@ -555,16 +822,25 @@ function animateFrame(ts) {
   }
 
   drawAllElements();
+  maybeUpdateCharts(ts);
+  maybeUpdateRobotInfo(ts);
+
   animationId = requestAnimationFrame(animateFrame);
 }
+
 
 function doSimStep() {
   cycleCount++;
   const t = cycleCount * robot.dt;
   document.getElementById('cycleCounter').textContent = `Ciclos: ${cycleCount} - Tiempo: ${t.toFixed(2)} s`;
 
+  // Guardar pose previa para dibujar SOLO el último segmento de trayectoria
+  const prevX = robot.x;
+  const prevY = robot.y;
+
   const { ex, ey, V, W } = robot.calculateControl(desired.x, desired.y);
 
+  // Log completo (para CSV/descargas)
   timeData.push(parseFloat(t.toFixed(2)));
   errorXData.push(ex);
   errorYData.push(ey);
@@ -576,8 +852,24 @@ function doSimStep() {
   goalXData.push(desired.x);
   goalYData.push(desired.y);
 
-  updateCharts(timeData, errorXData, errorYData, posXData, posYData, VData, WData, goalXData, goalYData);
+  // Ventana acotada (para Chart.js)
+  timePlot.push(parseFloat(t.toFixed(2)));
+  errorXPlot.push(ex);
+  errorYPlot.push(ey);
+  posXPlot.push(robot.x);
+  posYPlot.push(robot.y);
+  VPlot.push(V);
+  WPlot.push(W);
+  goalXPlot.push(desired.x);
+  goalYPlot.push(desired.y);
+  trimPlotDataIfNeeded();
+
+  // Trayectoria incremental (O(1) por paso)
+  addTrailSegment(prevX, prevY, robot.x, robot.y);
+
+  chartsDirty = true;
 }
+
 
 // --- MQTT
 function setMqttStatus(state, text) {

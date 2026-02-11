@@ -5,8 +5,11 @@ class Robot {
     this.theta = 0; // en radianes
     this.l = 50; // distancia al punto de control
     this.k = 0.1; // ganancia de control
-    this.dt = 0.1; // paso de tiempo
+    this.dt = 0.05; // paso de tiempo
     this.trajectory = [];
+    // Limitar la trayectoria guardada para evitar crecimiento infinito de memoria
+    this.maxTrajectoryPoints = 5000;
+    this._trajTrimChunk = 500;
   }
 
   setInitialConditions(x, y, theta) {
@@ -50,6 +53,11 @@ class Robot {
     this.y += V * Math.sin(this.theta) * this.dt;
 
     this.trajectory.push({ x: this.x, y: this.y });
+
+    // Recorte por bloques (evita que el array crezca sin límite)
+    if (this.trajectory.length > this.maxTrajectoryPoints + this._trajTrimChunk) {
+      this.trajectory.splice(0, this.trajectory.length - this.maxTrajectoryPoints);
+    }
 
     // Retornamos para registrar en las gráficas
     return { ex, ey, V, W };

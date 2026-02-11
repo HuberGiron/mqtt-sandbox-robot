@@ -4,24 +4,23 @@ function initCharts(timeData, errorXData, errorYData, posXData, posYData, VData,
   const commonOptions = {
     responsive: true,
     maintainAspectRatio: false,
-    animation: { duration: 0 }, // Actualización instantánea (sin animación)
+    animation: { duration: 0 },
+    // parsing: false,   // <-- QUITAR (esto te rompe series con data numérica)
+    // normalized: true, // opcional; puedes dejarlo fuera
+    interaction: { mode: 'nearest', intersect: false },
+    plugins: {
+      legend: { display: true },
+      decimation: { enabled: true, algorithm: 'min-max' }
+    },
     scales: {
       x: {
         title: { display: true, text: 'Tiempo (s)' },
         grid: { display: false },
-        ticks: {
-          autoSkip: true,
-          maxTicksLimit: 10
-        }
+        ticks: { autoSkip: true, maxTicksLimit: 10 }
       },
       y: {
         title: { display: true, text: 'Valor' },
         grid: { display: false }
-      }
-    },
-    plugins: {
-      legend: {
-        display: true
       }
     }
   };
@@ -154,27 +153,15 @@ function initCharts(timeData, errorXData, errorYData, posXData, posYData, VData,
   });
 }
 
-function updateCharts(timeData, errorXData, errorYData, posXData, posYData, VData, WData, goalXData, goalYData) {
-  errorChart.data.labels = timeData;
-  errorChart.data.datasets[0].data = errorXData;
-  errorChart.data.datasets[1].data = errorYData;
+function updateCharts(mode = 'none') {
+  if (!errorChart || !positionChart || !controlChart) return;
 
-  positionChart.data.labels = timeData;
-  positionChart.data.datasets[0].data = posXData;
-  positionChart.data.datasets[1].data = posYData;
-  if (positionChart.data.datasets.length > 2) {
-    positionChart.data.datasets[2].data = goalXData;
-    positionChart.data.datasets[3].data = goalYData;
-  }
-
-  controlChart.data.labels = timeData;
-  controlChart.data.datasets[0].data = VData;
-  controlChart.data.datasets[1].data = WData;
-
-  errorChart.update();
-  positionChart.update();
-  controlChart.update();
+  // 'none' evita animaciones/transition innecesarias en updates frecuentes
+  errorChart.update(mode);
+  positionChart.update(mode);
+  controlChart.update(mode);
 }
+
 
 function downloadChart(chartInstance, fileName) {
   const link = document.createElement('a');
@@ -198,7 +185,7 @@ function downloadCSVForChart(chartType) {
     for (let i = 0; i < timeData.length; i++) {
       const xs = (typeof goalXData !== 'undefined' && goalXData[i] != null) ? goalXData[i] : '';
       const ys = (typeof goalYData !== 'undefined' && goalYData[i] != null) ? goalYData[i] : '';
-      csv += timeData[i] + ',' + posXData[i] + ',' + posYData[i] + ',' + xs + ',' + ys + '';
+      csv += timeData[i] + ',' + posXData[i] + ',' + posYData[i] + ',' + xs + ',' + ys + '\n';
     }
   } else if (chartType === 'control') {
     fileName = 'control_chart_data';
