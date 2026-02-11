@@ -24,7 +24,7 @@ def main():
     ap.add_argument("--port", type=int, default=1883)  # TCP MQTT
     ap.add_argument("--topic", default="huber/robot/goal")
     ap.add_argument("--qos", type=int, default=0, choices=[0, 1, 2])
-    ap.add_argument("--step", type=float, default=0.30, help="segundos entre puntos publicados (>=0.2 recomendado)")
+    ap.add_argument("--step", type=float, default=0.10, help="segundos entre puntos publicados (>=0.2 recomendado)")
     ap.add_argument("--period", type=float, default=200.0, help="segundos para completar una vuelta")
     ap.add_argument("--cx", type=float, default=0.0)
     ap.add_argument("--cy", type=float, default=0.0)
