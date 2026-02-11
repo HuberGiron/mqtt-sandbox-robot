@@ -99,13 +99,13 @@ input {
 
 /* Canvas más ancho (≈ 80–95% del viewport) */
 .canvas-container {
-  width: 92vw;          /* usa ~92% del ancho de la pantalla */
-  max-width: 1400px;    /* límite razonable en monitores grandes */
+  width: 85vw;          /* usa ~92% del ancho de la pantalla */
+  max-width: 1200px;    /* límite razonable en monitores grandes */
   margin: 0 auto;
 }
 
-@media (max-width: 600px) {
-  .canvas-container { width: 100vw; }
+@media (max-width: 800px) {
+  .canvas-container { width: 92vw; }
 }
 
 

@@ -181,11 +181,16 @@ function downloadCSVForChart(chartType) {
     }
   } else if (chartType === 'position') {
     fileName = 'position_chart_data';
-    csv += 'Tiempo (s),Posición X (mm),Posición Y (mm),Objetivo Xs (mm),Objetivo Ys (mm)\n';
+    csv += 'Tiempo (s),Posición X (mm),Posición Y (mm),Objetivo Xs (mm),Objetivo Ys (mm),Ext X (mm),Ext Y (mm)\n';
+    //csv += 'Tiempo (s),Posición X (mm),Posición Y (mm),Ext X (mm),Ext Y (mm)\n';
+
     for (let i = 0; i < timeData.length; i++) {
       const xs = (typeof goalXData !== 'undefined' && goalXData[i] != null) ? goalXData[i] : '';
       const ys = (typeof goalYData !== 'undefined' && goalYData[i] != null) ? goalYData[i] : '';
-      csv += timeData[i] + ',' + posXData[i] + ',' + posYData[i] + ',' + xs + ',' + ys + '\n';
+      const exx = (typeof extXData !== 'undefined' && extXData[i] != null) ? extXData[i] : '';
+      const eyy = (typeof extYData !== 'undefined' && extYData[i] != null) ? extYData[i] : '';
+      csv += timeData[i] + ',' + posXData[i] + ',' + posYData[i] + ',' + xs + ',' + ys + ',' + exx + ',' + eyy +'\n';
+      //csv += timeData[i] + ',' + posXData[i] + ',' + posYData[i] + ',' + exx + ',' + eyy + '\n';
     }
   } else if (chartType === 'control') {
     fileName = 'control_chart_data';

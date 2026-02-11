@@ -2,6 +2,9 @@
 const MOBILE_BP = 800; // mismo breakpoint que usas para la imagen
 const STYLE_DESKTOP = { pathPx: 8, dotPx: 12 };
 const STYLE_MOBILE  = { pathPx: 4,  dotPx: 8 };
+let extXData = [];
+let extYData = [];
+
 
 function currentStyle() {
   return (window.innerWidth < MOBILE_BP) ? STYLE_MOBILE : STYLE_DESKTOP;
@@ -533,9 +536,9 @@ function drawAllElements() {
   const S = s * _dpr;
   ctx.setTransform(S, 0, 0, -S, cx * _dpr, cy * _dpr);
 
-  drawTrajectory(s);
-  drawRobot();
-  drawPointsCircles(s);
+drawRobot();
+drawTrajectory(s);
+drawPointsCircles(s);
 
   // ===== 3) Etiquetas (screen space) =====
   ctx.setTransform(_dpr, 0, 0, _dpr, 0, 0);
@@ -703,7 +706,7 @@ function drawRobot() {
   // ctx.shadowBlur = 10;
   ctx.translate(pos.x, pos.y);
   ctx.rotate(robot.theta);
-  ctx.drawImage(robotImg, robot.l - config.robotWidth, -config.robotHeight / 2, config.robotWidth, config.robotHeight);
+  ctx.drawImage(robotImg, robot.l - config.robotWidth+30, -config.robotHeight / 2, config.robotWidth, config.robotHeight);
   ctx.restore();
 }
 
@@ -767,6 +770,8 @@ function drawPointsCircles(s) {
 
   const extPoint = robot.getExtensionPoint();
   drawCircle(extPoint.x, extPoint.y, '#FF0000', s);
+
+  drawCircle(robot.x, robot.y, '#FF0000', s);
 }
 
 function updateRobotInfo() {
@@ -899,6 +904,10 @@ function resetSimulation() {
   chartsDirty = true;
   lastChartUpdateTs = 0;
 
+  extXData = [];
+  extYData = [];
+
+
   // UI
   animateBtn.innerHTML = `<span id="animateIcon">&#9658;</span> Iniciar`;
   setInputsEnabled(true);
@@ -966,12 +975,21 @@ function doSimStep() {
 
   const { ex, ey, V, W } = robot.calculateControl(desired.x, desired.y);
 
+  // const { ex, ey, V, W } = robot.calculateControl(endX, endY);
+
+  // Punto de extensión (dinámico) asociado al error: x_ext = x_s + e_x
+  const xExt = endX + ex;
+  const yExt = endY + ey;
+
+
   // Log completo (para CSV/descargas)
   timeData.push(parseFloat(t.toFixed(2)));
   errorXData.push(ex);
   errorYData.push(ey);
   posXData.push(robot.x);
   posYData.push(robot.y);
+  extXData.push(xExt);
+  extYData.push(yExt);
   VData.push(V);
   WData.push(W);
   thetaDegData.push(robot.theta * 180 / Math.PI);
@@ -998,6 +1016,23 @@ function doSimStep() {
 
 
 // --- MQTT
+let _pendingGoalRender = false;
+
+function requestGoalRender() {
+  // Si está corriendo, ya se repinta cada frame; no hace falta forzar
+  if (simState === 'running') return;
+
+  if (_pendingGoalRender) return;
+  _pendingGoalRender = true;
+
+  requestAnimationFrame((ts) => {
+    _pendingGoalRender = false;
+    drawAllElements();
+    // Fuerza panel de info para ver objetivo al instante
+    maybeUpdateRobotInfo(ts, true);
+  });
+}
+
 function setMqttStatus(state, text) {
   mqttStatusEl.textContent = text;
   mqttStatusEl.classList.remove('offline', 'connecting', 'online');
@@ -1005,6 +1040,11 @@ function setMqttStatus(state, text) {
 }
 
 function mqttConnect() {
+  // Forzar modo MQTT para aceptar inmediatamente mensajes entrantes
+  if (desired.source !== 'mqtt') {
+    setTargetSource('mqtt');
+  }
+
   const url = (mqttUrlInput.value || '').trim();
   const topic = (mqttTopicInput.value || '').trim();
   if (!url || !topic) {
@@ -1058,12 +1098,21 @@ function mqttConnect() {
   });
 
   mqttClient.on('message', (t, msg) => {
-    if (t !== mqttSubscribedTopic) return;
-    const payload = msg.toString();
-    const parsed = parseGoalPayload(payload);
-    if (!parsed) return;
-    setDesired(parsed.x, parsed.y, 'mqtt');
-  });
+  if (t !== mqttSubscribedTopic) return;
+  const payload = msg.toString();
+  const parsed = parseGoalPayload(payload);
+  if (!parsed) return;
+
+  setDesired(parsed.x, parsed.y, 'mqtt');
+
+  // ✅ NUEVO: forzar actualización visual inmediata cuando no estás corriendo animación
+  if (simState !== 'running') {
+    drawAllElements();
+    maybeUpdateRobotInfo(performance.now(), true);
+  }
+});
+
+
 }
 
 function mqttDisconnect() {
