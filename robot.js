@@ -16,7 +16,8 @@ class Robot {
     this.x = x;
     this.y = y;
     this.theta = theta * Math.PI / 180; // convertir a radianes
-    this.trajectory = [{ x: this.x, y: this.y }];
+    const ext = this.getExtensionPoint();
+    this.trajectory = [{ x: ext.x, y: ext.y }];
   }
 
   /**
@@ -52,7 +53,9 @@ class Robot {
     this.x += V * Math.cos(this.theta) * this.dt;
     this.y += V * Math.sin(this.theta) * this.dt;
 
-    this.trajectory.push({ x: this.x, y: this.y });
+    const extNow = this.getExtensionPoint();
+    this.trajectory.push({ x: extNow.x, y: extNow.y });
+
 
     // Recorte por bloques (evita que el array crezca sin límite)
     if (this.trajectory.length > this.maxTrajectoryPoints + this._trajTrimChunk) {

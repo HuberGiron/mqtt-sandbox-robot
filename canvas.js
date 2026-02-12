@@ -479,19 +479,28 @@ function setDesired(x, y, origin = 'mqtt') {
   desired.lastUpdateMs = Date.now();
 }
 
+function setRobotPoseFromExtension(xExt, yExt, thetaDeg) {
+  const th = thetaDeg * Math.PI / 180;
+  const xCenter = xExt - robot.l * Math.cos(th);
+  const yCenter = yExt - robot.l * Math.sin(th);
+  robot.setInitialConditions(xCenter, yCenter, thetaDeg);
+}
+
 // --- Previsualización (solo en idle)
 function updatePreview() {
   if (simState !== 'idle') return;
 
-  const startX = parseFloat(startXInput.value);
-  const startY = parseFloat(startYInput.value);
-  const angle = parseFloat(angleInput.value);
+const startX = parseFloat(startXInput.value); // ahora es EXT
+const startY = parseFloat(startYInput.value); // ahora es EXT
+const angle  = parseFloat(angleInput.value);
 
-  robot.setInitialConditions(startX, startY, angle);
+// 1) primero parámetros (importante para robot.l)
+robot.k  = parseFloat(kInput.value);
+robot.l  = parseFloat(lInput.value);
+robot.dt = parseFloat(dtInput.value);
 
-  robot.k = parseFloat(kInput.value);
-  robot.l = parseFloat(lInput.value);
-  robot.dt = parseFloat(dtInput.value);
+// 2) luego convertir EXT -> CENTRO y setear pose
+setRobotPoseFromExtension(startX, startY, angle);
 
   if (desired.source === 'manual') {
     updateDesiredFromInputs();
@@ -506,6 +515,8 @@ function updatePreview() {
   drawAllElements();
   maybeUpdateRobotInfo(performance.now(), true);
 }
+
+
 
 
 // --- Dibujo
@@ -765,13 +776,13 @@ function drawPointsCircles(s) {
   const endX = parseFloat(document.getElementById('endX').value);
   const endY = parseFloat(document.getElementById('endY').value);
 
-  drawCircle(startX, startY, '#FF0000', s);
   drawCircle(endX, endY, '#0044FF', s);
 
   const extPoint = robot.getExtensionPoint();
   drawCircle(extPoint.x, extPoint.y, '#FF0000', s);
+  drawCircle(startX , startY, '#FF0000', s);
 
-  drawCircle(robot.x, robot.y, '#FF0000', s);
+  //drawCircle(robot.x, robot.y, '#FF0000', s);
 }
 
 function updateRobotInfo() {
@@ -913,10 +924,17 @@ function resetSimulation() {
   setInputsEnabled(true);
 
   // Volver a condiciones actuales del formulario
-  const startX = parseFloat(startXInput.value);
-  const startY = parseFloat(startYInput.value);
-  const angle = parseFloat(angleInput.value);
-  robot.setInitialConditions(startX, startY, angle);
+  const startX = parseFloat(startXInput.value); // ahora es EXT
+  const startY = parseFloat(startYInput.value); // ahora es EXT
+  const angle  = parseFloat(angleInput.value);
+
+  // 1) primero parámetros (importante para robot.l)
+  robot.k  = parseFloat(kInput.value);
+  robot.l  = parseFloat(lInput.value);
+  robot.dt = parseFloat(dtInput.value);
+
+  // 2) luego convertir EXT -> CENTRO y setear pose
+  setRobotPoseFromExtension(startX, startY, angle);
 
   if (desired.source === 'manual') updateDesiredFromInputs();
 
@@ -965,53 +983,61 @@ function animateFrame(ts) {
 
 
 function doSimStep() {
+
   cycleCount++;
   const t = cycleCount * robot.dt;
   document.getElementById('cycleCounter').textContent = `Ciclos: ${cycleCount} - Tiempo: ${t.toFixed(2)} s`;
 
   // Guardar pose previa para dibujar SOLO el último segmento de trayectoria
-  const prevX = robot.x;
-  const prevY = robot.y;
+  // Guardar punto de extensión previo (para el trazo incremental)
+// Guardar punto de extensión previo (para el trazo incremental)
+const prevExt = robot.getExtensionPoint();
 
-  const { ex, ey, V, W } = robot.calculateControl(desired.x, desired.y);
+const { ex, ey, V, W } = robot.calculateControl(desired.x, desired.y);
 
-  // const { ex, ey, V, W } = robot.calculateControl(endX, endY);
+// Punto de extensión actual (después de actualizar la pose)
+const extNow = robot.getExtensionPoint();
 
-  // Punto de extensión (dinámico) asociado al error: x_ext = x_s + e_x
-  const xExt = endX + ex;
-  const yExt = endY + ey;
+// Log completo (para CSV/descargas)
+timeData.push(parseFloat(t.toFixed(2)));
+errorXData.push(ex);
+errorYData.push(ey);
+
+// AHORA "posición" = punto de extensión
+posXData.push(extNow.x);
+posYData.push(extNow.y);
+
+// (Opcional útil) guarda también el centro en extX/extY para no perderlo
+extXData.push(robot.x);
+extYData.push(robot.y);
+
+VData.push(V);
+WData.push(W);
+thetaDegData.push(robot.theta * 180 / Math.PI);
+goalXData.push(desired.x);
+goalYData.push(desired.y);
+
+// Ventana acotada (Chart.js)
+timePlot.push(parseFloat(t.toFixed(2)));
+errorXPlot.push(ex);
+errorYPlot.push(ey);
+
+// También en plot: extensión
+posXPlot.push(extNow.x);
+posYPlot.push(extNow.y);
+
+VPlot.push(V);
+WPlot.push(W);
+goalXPlot.push(desired.x);
+goalYPlot.push(desired.y);
+trimPlotDataIfNeeded();
+
+// Trayectoria incremental (O(1) por paso): ahora con extensión
+addTrailSegment(prevExt.x, prevExt.y, extNow.x, extNow.y);
+
+chartsDirty = true;
 
 
-  // Log completo (para CSV/descargas)
-  timeData.push(parseFloat(t.toFixed(2)));
-  errorXData.push(ex);
-  errorYData.push(ey);
-  posXData.push(robot.x);
-  posYData.push(robot.y);
-  extXData.push(xExt);
-  extYData.push(yExt);
-  VData.push(V);
-  WData.push(W);
-  thetaDegData.push(robot.theta * 180 / Math.PI);
-  goalXData.push(desired.x);
-  goalYData.push(desired.y);
-
-  // Ventana acotada (para Chart.js)
-  timePlot.push(parseFloat(t.toFixed(2)));
-  errorXPlot.push(ex);
-  errorYPlot.push(ey);
-  posXPlot.push(robot.x);
-  posYPlot.push(robot.y);
-  VPlot.push(V);
-  WPlot.push(W);
-  goalXPlot.push(desired.x);
-  goalYPlot.push(desired.y);
-  trimPlotDataIfNeeded();
-
-  // Trayectoria incremental (O(1) por paso)
-  addTrailSegment(prevX, prevY, robot.x, robot.y);
-
-  chartsDirty = true;
 }
 
 

@@ -181,7 +181,8 @@ function downloadCSVForChart(chartType) {
     }
   } else if (chartType === 'position') {
     fileName = 'position_chart_data';
-    csv += 'Tiempo (s),Posición X (mm),Posición Y (mm),Objetivo Xs (mm),Objetivo Ys (mm),Ext X (mm),Ext Y (mm)\n';
+    csv += 'Tiempo (s),Extensión X (mm),Extensión Y (mm),Objetivo Xs (mm),Objetivo Ys (mm),Centro X (mm),Centro Y (mm)\n';
+    //csv += 'Tiempo (s),Posición X (mm),Posición Y (mm),Objetivo Xs (mm),Objetivo Ys (mm),Ext X (mm),Ext Y (mm)\n';
     //csv += 'Tiempo (s),Posición X (mm),Posición Y (mm),Ext X (mm),Ext Y (mm)\n';
 
     for (let i = 0; i < timeData.length; i++) {
